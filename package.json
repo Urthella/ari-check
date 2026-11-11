@@ -1,0 +1,25 @@
+{
+  "name": "ari-check",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ask the CA when to renew: reads each host's TLS certificate and fetches its ACME Renewal Information (RFC 9773) suggested renewal window",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "ari-check": "src/main.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "node --test test/*.test.ts",
+    "crosscheck": "node scripts/crosscheck.ts"
+  },
+  "devDependencies": {
+    "@peculiar/x509": "^3.1.0",
+    "@types/node": "^24.19.2",
+    "reflect-metadata": "^0.2.2",
+    "typescript": "^7.0.2"
+  }
+}
