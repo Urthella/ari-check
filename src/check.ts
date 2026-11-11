@@ -1,7 +1,8 @@
-// Checks one host: reads the certificate it serves, asks the issuing CA for a renewal window when
-// it publishes one, and describes the result.
+// Checks one certificate, served by a host or kept in a file: asks the issuing CA for a renewal
+// window when it publishes one, and describes the result.
 
 import { X509Certificate } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { connect } from "node:tls";
 
@@ -18,7 +19,7 @@ export interface Result {
   issuer?: string;
   notBefore?: Date;
   notAfter?: Date;
-  /** Whether the chain verifies against this machine's trust store. */
+  /** Whether the chain verifies against this machine's trust store; unknown for a file. */
   trusted?: boolean;
   certId?: string;
   ari?: RenewalInfo;
@@ -58,11 +59,28 @@ function attribute(name: string, key: string): string | undefined {
   return name.split("\n").find((line) => line.startsWith(`${key}=`))?.slice(key.length + 1);
 }
 
-export async function check(target: string, options: Options = {}): Promise<Result> {
+/** A certificate from a file: the first one in a PEM file, which is the leaf in a chain, or DER. */
+export async function readCertificate(path: string): Promise<Buffer> {
+  const data = await readFile(path);
+  const pem = /-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----/.exec(data.toString("latin1"));
+  return pem ? Buffer.from(pem[1].replace(/\s+/g, ""), "base64") : data;
+}
+
+export function check(target: string, options: Options = {}): Promise<Result> {
+  return examine(target, async () => {
+    const { host, port } = parseTarget(target);
+    return fetchCertificate(host, port);
+  }, options);
+}
+
+export function checkFile(path: string, options: Options = {}): Promise<Result> {
+  return examine(path, async () => ({ der: await readCertificate(path), trusted: undefined }), options);
+}
+
+async function examine(target: string, load: () => Promise<{ der: Buffer; trusted?: boolean }>, options: Options): Promise<Result> {
   const now = options.now ?? new Date();
   try {
-    const { host, port } = parseTarget(target);
-    const { der, trusted } = await fetchCertificate(host, port);
+    const { der, trusted } = await load();
     const x509 = new X509Certificate(der);
     const notBefore = x509.validFromDate;
     const notAfter = x509.validToDate;
@@ -103,7 +121,7 @@ export function describe(result: Result, now: Date): string {
   const lifetime = Math.round((result.notAfter.getTime() - result.notBefore.getTime()) / DAY_MS);
   const left = Math.floor((result.notAfter.getTime() - now.getTime()) / DAY_MS);
   const lines = [
-    `${result.target}  ${result.subject}, issued by ${result.issuer}${result.trusted ? "" : " (not trusted here)"}`,
+    `${result.target}  ${result.subject}, issued by ${result.issuer}${result.trusted === false ? " (not trusted here)" : ""}`,
     `  ${lifetime}-day certificate, ${left >= 0 ? `expires ${when(result.notAfter)}, in ${left} days` : `expired ${when(result.notAfter)}`}`,
   ];
   const { from, until, status } = result.plan;

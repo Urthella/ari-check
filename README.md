@@ -40,9 +40,19 @@ github.com  github.com, issued by Sectigo Limited Sectigo Public Server Authenti
   this CA doesn't publish renewal information; renew once two thirds of its lifetime have passed, from 2026-12-28 23:59 UTC: not yet
 ```
 
-Hosts can carry a port, as `host:443` or `[::1]:8443`. `--json` prints the results as JSON.
-`--directory URL` asks that ACME directory for every host, which is useful for a CA the tool
-doesn't know.
+Hosts can carry a port, as `host:443` or `[::1]:8443`.
+
+`--file PATH` checks a certificate file instead of a live host. This works for a certificate
+your ACME client just wrote, before the server reloads it, or for a service that doesn't speak
+TLS from the first byte. The file can be PEM, where the first certificate is used, as the leaf
+comes first in a chain, or DER. Repeat the flag for more files:
+
+```sh
+node src/main.ts --file /etc/letsencrypt/live/example.com/fullchain.pem
+```
+
+`--json` prints the results as JSON. `--directory URL` asks that ACME directory for every
+certificate, which is useful for a CA the tool doesn't know.
 
 The exit code:
 
@@ -88,8 +98,9 @@ The exit code:
   - an open window gives 1;
   - an unknown certificate falls back to the lifetime rule;
   - an expired certificate gives 1, and the CA is never asked about it;
-  - unreachable hosts and bad arguments give 2.
-- **Mutation testing.** Twenty-one deliberate bugs were planted one at a time, and the tests
+  - a PEM chain file is read by its first certificate, and a DER file works too;
+  - unreachable hosts, unreadable files and bad arguments give 2.
+- **Mutation testing.** Twenty-five deliberate bugs were planted one at a time, and the tests
   caught every one.
 - **Live**, with `npm run crosscheck`. Six hosts, served by Let's Encrypt and Google Trust
   Services, were checked:
@@ -99,7 +110,8 @@ The exit code:
 
 ## Limits
 
-- It checks one certificate per host, the one served for its name. There's no STARTTLS.
+- It checks one certificate per host, the one served for its name. There's no STARTTLS; use
+  `--file` for those certificates.
 - Only the CAs above are known by name. Others need `--directory`.
 - It tells you when to renew; it doesn't renew anything.
 

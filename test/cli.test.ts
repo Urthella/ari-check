@@ -3,9 +3,11 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createServer as createTlsServer } from "node:tls";
 import { fileURLToPath } from "node:url";
@@ -89,6 +91,44 @@ test("reports an expired certificate without asking the CA about it, and exits 1
   assert.equal(code, 1, out);
   assert.match(out, /expired 2025-02-01 00:00 UTC\n {2}expired/);
   assert.ok(!asked.includes(`/renewal-info/${EXPIRED_ID}`), "RFC 9773 section 4.3: never ask about an expired certificate");
+});
+
+test("checks certificate files: a PEM chain by its first certificate, and DER", async () => {
+  suggested = { start: inDays(10), end: inDays(12) };
+  const dir = mkdtempSync(join(tmpdir(), "ari-check-"));
+  try {
+    const chain = join(dir, "chain.pem");
+    const der = join(dir, "certificate.der");
+    writeFileSync(chain, fixture("localhost.pem") + fixture("ca.pem"));
+    writeFileSync(der, new Uint8Array(certificate.rawData));
+    const { code, out } = await run(...directory(), "--file", chain, "--file", der, "--json");
+    assert.equal(code, 0, out);
+    const results = JSON.parse(out);
+    assert.deepEqual(results.map((r: { target: string }) => r.target), [chain, der]);
+    for (const result of results) {
+      assert.equal(result.certId, ID, `${result.target} is read as the leaf`);
+      assert.equal(result.plan.source, "ari");
+      assert.equal(result.trusted, undefined, "a file has no chain to verify");
+    }
+    const text = await run(...directory(), "--file", chain);
+    assert.doesNotMatch(text.out, /not trusted/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("exits 2 for a file it can't read as a certificate", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ari-check-"));
+  try {
+    const garbage = join(dir, "garbage.pem");
+    writeFileSync(garbage, "not a certificate");
+    const { code, out } = await run(...directory(), "--file", join(dir, "missing.pem"), "--file", garbage);
+    assert.equal(code, 2, out);
+    assert.match(out, /missing\.pem {2}error: ENOENT/);
+    assert.match(out, /garbage\.pem {2}error:/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("exits 2 for a missing directory, an unreachable host, or a bad target", async () => {
